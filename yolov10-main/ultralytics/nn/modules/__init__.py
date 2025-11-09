@@ -28,6 +28,7 @@ from .block import (
     Bottleneck,
     BottleneckCSP,
     C2f,
+    C2fStar,
     C2fAttn,
     ImagePoolingAttn,
     C3Ghost,
@@ -49,7 +50,9 @@ from .block import (
     PSA,
     C2fCIB,
     SCDown,
-    RepVGGDW
+    RepVGGDW,
+    DropPath,
+    StarBlock
 )
 from .conv import (
     CBAM,
@@ -107,6 +110,7 @@ __all__ = (
     "C2",
     "C3",
     "C2f",
+    "C2fStar",
     "C2fAttn",
     "C3x",
     "C3TR",
@@ -143,5 +147,7 @@ __all__ = (
     "C2fCIB",
     "SCDown",
     "RepVGGDW",
+    "DropPath",
+    "StarBlock",
     "v10Detect"
 )
