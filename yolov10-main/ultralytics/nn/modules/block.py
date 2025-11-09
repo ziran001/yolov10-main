@@ -1,6 +1,8 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 """Block modules."""
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,6 +21,7 @@ __all__ = (
     "C2",
     "C3",
     "C2f",
+    "C2fStar",
     "C2fAttn",
     "ImagePoolingAttn",
     "ContrastiveHead",
@@ -38,6 +41,8 @@ __all__ = (
     "CBFuse",
     "CBLinear",
     "Silence",
+    "DropPath",
+    "StarBlock",
 )
 
 
@@ -236,6 +241,75 @@ class C2f(nn.Module):
         """Forward pass using split() instead of chunk()."""
         y = list(self.cv1(x).split((self.c, self.c), 1))
         y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+
+
+class DropPath(nn.Module):
+    """Stochastic Depth per sample."""
+
+    def __init__(self, drop_prob=0.0):
+        super().__init__()
+        self.drop_prob = float(drop_prob)
+
+    def forward(self, x):
+        """Apply DropPath regularization during training."""
+        if self.drop_prob == 0.0 or not self.training:
+            return x
+        keep_prob = 1.0 - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
+        random_tensor.floor_()
+        return x.div(keep_prob) * random_tensor
+
+
+class StarBlock(nn.Module):
+    """Lightweight feature enhancement block with dynamic channel interaction."""
+
+    def __init__(self, channels, expansion=1.5, drop_path=0.0, shortcut=True):
+        super().__init__()
+        hidden = max(int(math.ceil(channels * expansion)), channels)
+        self.branch_enhance = nn.Sequential(
+            Conv(channels, hidden, 1, 1),
+            Conv(hidden, hidden, 3, 1, g=hidden),
+            Conv(hidden, channels, 1, 1, act=False),
+        )
+        self.branch_gate = Conv(channels, channels, 1, 1, act=False)
+        self.act = nn.SiLU()
+        self.shortcut = shortcut
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+
+    def forward(self, x):
+        """Forward pass with channel interaction and optional residual shortcut."""
+        enhanced = self.branch_enhance(x)
+        gate = torch.sigmoid(self.branch_gate(x))
+        out = self.act(enhanced * gate)
+        out = self.drop_path(out)
+        return x + out if self.shortcut else out
+
+
+class C2fStar(nn.Module):
+    """C2f variant employing StarBlock for lightweight feature refinement."""
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, drop_path=0.0, expansion=1.5):
+        super().__init__()
+        self.c = int(c2 * e)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)
+        if isinstance(drop_path, (list, tuple)):
+            if len(drop_path) != n:
+                raise ValueError("drop_path list length must equal number of StarBlock repeats")
+            drop_rates = drop_path
+        else:
+            drop_rates = [drop_path] * n
+        self.m = nn.ModuleList(
+            StarBlock(self.c, expansion=expansion, drop_path=drop_rates[i], shortcut=shortcut) for i in range(n)
+        )
+
+    def forward(self, x):
+        """Forward pass through the C2fStar layer."""
+        y = list(self.cv1(x).chunk(2, 1))
+        for m in self.m:
+            y.append(m(y[-1]))
         return self.cv2(torch.cat(y, 1))
 
 
