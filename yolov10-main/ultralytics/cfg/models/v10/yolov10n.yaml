@@ -2,39 +2,52 @@
 nc: 80 # number of classes
 scales: # model compound scaling constants, i.e. 'model=yolov8n.yaml' will call yolov8.yaml with scale 'n'
   # [depth, width, max_channels]
-  n: [0.33, 0.25, 1024] 
+  n: [0.33, 0.25, 1024]
 
-# YOLOv8.0n backbone
+# YOLO-FRP backbone
 backbone:
   # [from, repeats, module, args]
   - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2
   - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4
-  - [-1, 3, C2f, [128, True]]
+  - [-1, 3, C2fStar, [128, True]]
   - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8
   - [-1, 6, C2f, [256, True]]
   - [-1, 1, SCDown, [512, 3, 2]] # 5-P4/16
-  - [-1, 6, C2f, [512, True]]
+  - [-1, 4, C2fCIB, [512, True, False]]
   - [-1, 1, SCDown, [1024, 3, 2]] # 7-P5/32
-  - [-1, 3, C2f, [1024, True]]
+  - [-1, 3, C2fCIB, [1024, True, True]]
   - [-1, 1, SPPF, [1024, 5]] # 9
   - [-1, 1, PSA, [1024]] # 10
 
-# YOLOv8.0n head
+# YOLO-FRP neck with BiFPN-style fusion
 head:
-  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
-  - [[-1, 6], 1, Concat, [1]] # cat backbone P4
-  - [-1, 3, C2f, [512]] # 13
+  - [10, 1, Conv, [1024, 1, 1]] # 11 P5 lateral
+  - [6, 1, Conv, [512, 1, 1]] # 12 P4 lateral
+  - [4, 1, Conv, [256, 1, 1]] # 13 P3 lateral
+  - [2, 1, Conv, [128, 1, 1]] # 14 P2 lateral
 
-  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
-  - [[-1, 4], 1, Concat, [1]] # cat backbone P3
-  - [-1, 3, C2f, [256]] # 16 (P3/8-small)
+  - [11, 1, nn.Upsample, [None, 2, "nearest"]] # 15
+  - [[-1, 12], 1, Concat, [1]]
+  - [-1, 1, C2f, [512]] # 17 P4_td
 
-  - [-1, 1, Conv, [256, 3, 2]]
-  - [[-1, 13], 1, Concat, [1]] # cat head P4
-  - [-1, 3, C2f, [512]] # 19 (P4/16-medium)
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 18
+  - [[-1, 13], 1, Concat, [1]]
+  - [-1, 1, C2f, [256]] # 20 P3_td
 
-  - [-1, 1, SCDown, [512, 3, 2]]
-  - [[-1, 10], 1, Concat, [1]] # cat head P5
-  - [-1, 3, C2fCIB, [1024, True, True]] # 22 (P5/32-large)
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 21
+  - [[-1, 14], 1, Concat, [1]]
+  - [-1, 1, C2fStar, [128, True]] # 23 P2_out
 
-  - [[16, 19, 22], 1, v10Detect, [nc]] # Detect(P3, P4, P5)
+  - [-1, 1, Conv, [256, 3, 2]] # 24
+  - [[-1, 20, 13], 1, Concat, [1]]
+  - [-1, 1, C2f, [256]] # 26 P3_out
+
+  - [-1, 1, Conv, [512, 3, 2]] # 27
+  - [[-1, 17, 12], 1, Concat, [1]]
+  - [-1, 1, C2f, [512]] # 29 P4_out
+
+  - [-1, 1, Conv, [1024, 3, 2]] # 30
+  - [[-1, 11], 1, Concat, [1]]
+  - [-1, 1, C2fCIB, [1024, True, True]] # 32 P5_out
+
+  - [[23, 26, 29, 32], 1, v10Detect, [nc]] # Detect(P2, P3, P4, P5)
